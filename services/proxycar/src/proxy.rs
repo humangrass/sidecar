@@ -2,12 +2,13 @@ use axum::{
     body::Body,
     extract::State,
     http::{Request, Response, StatusCode},
-    routing::post,
     Router,
 };
 use reqwest::Client;
 use std::sync::Arc;
 use axum::body::to_bytes;
+use axum::routing::any;
+use log::{error, info};
 use crate::config::TargetServiceConfig;
 
 #[derive(Clone)]
@@ -34,6 +35,7 @@ async fn proxy_request(
     let body_bytes = to_bytes(req.into_body(), 0)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    info!("Sending request to target: {}", target_uri);
 
     let client = &state.client;
     let mut request_builder = client.request(method, &target_uri);
@@ -46,7 +48,15 @@ async fn proxy_request(
         .body(body_bytes)
         .send()
         .await
-        .map_err(|_| StatusCode::BAD_GATEWAY)?;
+        .map_err(|err| {
+            error!("Request to target failed: {}", err);
+            StatusCode::BAD_GATEWAY
+        })?;
+    info!(
+        "Received response from target: {} - Status: {}",
+        target_uri,
+        response.status()
+    );
 
     let mut builder = Response::builder().status(response.status());
     for (key, value) in response.headers() {
@@ -67,6 +77,6 @@ pub fn app_router(config: TargetServiceConfig) -> Router {
     };
 
     Router::new()
-        .route("/proxy", post(proxy_request))
+        .route("/*path", any(proxy_request))
         .with_state(state)
 }
