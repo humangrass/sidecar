@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+default-members = [
+    "services/proxycar",
+]
+
+members = [
+    "services/proxycar",
+]
+
+[workspace.dependencies]

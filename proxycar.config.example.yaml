@@ -1,0 +1,7 @@
+http:
+  listen_port: 3000
+  target_service:
+    host: localhost
+    port: 8000
+tracing:
+  collector_endpoint: "http://localhost:8000"
