@@ -3,5 +3,6 @@ http:
   target_service:
     host: localhost
     port: 8000
+# todo
 tracing:
-  collector_endpoint: "http://localhost:8000"
+  collector_endpoint: "http://localhost:9999"
