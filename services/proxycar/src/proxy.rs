@@ -9,6 +9,9 @@ use std::sync::Arc;
 use axum::body::to_bytes;
 use axum::routing::any;
 use log::{error, info};
+use tokio_util::bytes;
+use bytes::Bytes;
+use tracing::{Level, span};
 use crate::config::TargetServiceConfig;
 
 #[derive(Clone)]
@@ -29,42 +32,56 @@ async fn proxy_request(
         req.uri()
     );
 
+    // put sidecar logic here
+    let method = req.method().clone();
+    let span = span!(Level::INFO, "proxy_request", method = %method, uri = %target_uri);
+    info!("proxy_request: method={}, uri={}", method, target_uri);
+    let _enter = span.enter();
+
+    match forward_request(&state.client, req, &target_uri).await {
+        Ok(response) => {
+            info!("Response received with status: {}", response.status());
+            Ok(response)
+        }
+        Err(err) => {
+            error!("Failed to proxy request: {}", err);
+            Err(StatusCode::BAD_GATEWAY)
+        }
+    }
+}
+
+async fn forward_request(
+    client: &Client,
+    req: Request<Body>,
+    target_uri: &str,
+) -> Result<Response<Body>, reqwest::Error> {
     let method = req.method().clone();
     let headers = req.headers().clone();
 
-    let body_bytes = to_bytes(req.into_body(), 0)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    info!("Sending request to target: {}", target_uri);
+    let body_bytes = to_bytes(req.into_body(), 0).await.unwrap_or_else(|err| {
+        error!("Failed to read request body: {}", err);
+        Bytes::new()
+    });
 
-    let client = &state.client;
-    let mut request_builder = client.request(method, &target_uri);
+    let mut request_builder = client.request(method, target_uri).body(body_bytes);
 
-    for (key, value) in headers.iter() {
-        request_builder = request_builder.header(key, value);
+    for (key, value) in headers {
+        if let (Some(key), Some(value)) = (key, value.to_str().ok()) {
+            request_builder = request_builder.header(key, value);
+        }
     }
 
-    let response = request_builder
-        .body(body_bytes)
-        .send()
-        .await
-        .map_err(|err| {
-            error!("Request to target failed: {}", err);
-            StatusCode::BAD_GATEWAY
-        })?;
-    info!(
-        "Received response from target: {} - Status: {}",
-        target_uri,
-        response.status()
-    );
+    let response = request_builder.send().await?;
+    let status = response.status();
+    let headers = response.headers().clone();
+    let body = response.bytes().await?;
 
-    let mut builder = Response::builder().status(response.status());
-    for (key, value) in response.headers() {
-        builder = builder.header(key, value);
+    let mut builder = Response::builder().status(status);
+    for (key, value) in headers {
+        if let (Some(key), Some(value)) = (key, value.to_str().ok()) {
+            builder = builder.header(key, value);
+        }
     }
-
-    let body = response.bytes().await.map_err(|_| StatusCode::BAD_GATEWAY)?;
-
     Ok(builder.body(Body::from(body)).unwrap())
 }
 
