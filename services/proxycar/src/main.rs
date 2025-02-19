@@ -21,9 +21,9 @@ async fn run() -> anyhow::Result<()> {
 
     let app = app_router(config.http.target_service);
     let address = format!("localhost:{}", config.http.listen_port);
-    let listener = tokio::net::TcpListener::bind(address).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(address).await?;
 
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app).await?;
 
     Ok(())
 }
